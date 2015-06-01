@@ -1,5 +1,6 @@
 #![crate_name = "cuckoo"]
 #![crate_type = "lib"]
+#![feature(unboxed_closures)]
 #![feature(alloc)]
 
 extern crate time;
@@ -34,25 +35,35 @@ impl Map {
     }
 
     pub fn set(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
-        let upd = |prev : Option<&memcache::Item>| -> (memcache::Status, Result<memcache::Item, Option<String>>) {
-            match prev {
-                None => { (memcache::Status::SUCCESS, Ok(memcache::Item {
-                    bytes: bytes.to_vec(),
-                    flags: flags,
-                    casid: 1,
-                    expires: expires,
-                }))}
-                Some(v) => { (memcache::Status::SUCCESS, Ok(memcache::Item {
-                    bytes: bytes.to_vec(),
-                    flags: flags,
-                    casid: v.casid + 1,
-                    expires: expires,
-                }))}
-            }
-        };
+        self.map.read().unwrap().insert(key, memcache::fset(bytes, flags, expires, 0))
+    }
 
-        //(memcache::Status::ENOMEM, Err(None))
-        self.map.read().unwrap().insert(key, upd)
+    pub fn add(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+        self.map.read().unwrap().insert(key, memcache::fadd(bytes, flags, expires))
+    }
+
+    pub fn replace(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+        self.map.read().unwrap().insert(key, memcache::freplace(bytes, flags, expires))
+    }
+
+    pub fn append(&self, key : &Vec<u8>, bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
+        self.map.read().unwrap().insert(key, memcache::fappend(bytes, casid))
+    }
+
+    pub fn prepend(&self, key : &Vec<u8>, bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
+        self.map.read().unwrap().insert(key, memcache::fprepend(bytes, casid))
+    }
+
+    pub fn cas(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64, casid : u64) -> memcache::MapResult {
+        self.map.read().unwrap().insert(key, memcache::fset(bytes, flags, expires, casid))
+    }
+
+    pub fn incr(&self, key : &Vec<u8>, by : u64, def : u64, expires : i64) -> memcache::MapResult {
+        self.map.read().unwrap().insert(key, memcache::fincr(by, def, expires))
+    }
+
+    pub fn decr(&self, key : &Vec<u8>, by : u64, def : u64, expires : i64) -> memcache::MapResult {
+        self.map.read().unwrap().insert(key, memcache::fincr(by, def, expires))
     }
 }
 
@@ -133,9 +144,7 @@ impl CuckooMap {
         v
     }
 
-    pub fn insert<F>(&self, key : &Vec<u8>, upd : F) -> memcache::MapResult
-        where F : Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)
-    {
+    pub fn insert(&self, key : &Vec<u8>, upd : Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> memcache::MapResult {
         let now = time::get_time().sec;
         let mut bins = (0..self.nhashes).map(|n| self.nth_key_bin(&key[..], n)).collect();
 
