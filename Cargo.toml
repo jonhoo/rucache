@@ -1,5 +1,5 @@
 [package]
-name = "cuckoo"
+name = "cucache"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 

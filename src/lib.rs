@@ -1,4 +1,4 @@
-#![crate_name = "cuckoo"]
+#![crate_name = "cucache"]
 #![crate_type = "lib"]
 #![feature(unboxed_closures)]
 #![feature(alloc)]
@@ -20,7 +20,7 @@ use rand::Rng;
 
 mod bins;
 mod slot;
-mod memcache;
+pub mod memcache;
 
 const MAX_HASHES : usize = 10;
 const MAX_SEARCH_DEPTH : usize = 100;

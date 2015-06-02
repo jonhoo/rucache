@@ -1,3 +1,6 @@
+# Racer
+*.racertmp
+
 # Compiled files
 *.o
 *.so
