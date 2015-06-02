@@ -23,7 +23,7 @@ mod slot;
 mod memcache;
 
 const MAX_HASHES : usize = 10;
-const MAX_SEARCH_DEPTH : usize = 1000;
+const MAX_SEARCH_DEPTH : usize = 100;
 
 struct CuckooMap {
     magic   : u8,
