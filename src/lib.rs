@@ -6,6 +6,9 @@
 extern crate time;
 extern crate rand;
 
+#[macro_use]
+extern crate log;
+
 use std::sync;
 use std::boxed;
 use std::sync::Arc;
@@ -14,6 +17,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering;
 use std::sync::RwLockReadGuard;
+
 
 #[cfg(test)]
 use rand::Rng;
@@ -26,7 +30,6 @@ const MAX_HASHES : usize = 10;
 const MAX_SEARCH_DEPTH : usize = 100;
 
 struct CuckooMap {
-    magic   : u8,
 	bins    : Vec<bins::Bin>,
 	nhashes : AtomicUsize,
 }
@@ -41,13 +44,13 @@ pub struct Map {
 
 impl Map {
     fn fix(&self, nhashes : usize, rlock : RwLockReadGuard<bool>) {
-        println!("asked to grow map");
+        debug!("asked to grow map");
 
         if nhashes+1 < MAX_HASHES {
             if self.get_().nhashes.compare_and_swap(nhashes, nhashes+1, Ordering::SeqCst) == nhashes {
-                println!("increased the number of hashes to {}", nhashes+1);
+                info!("increased the number of hashes to {}", nhashes+1);
             } else {
-                println!("someone already changed the number of hash functions");
+                debug!("someone already changed the number of hash functions");
             }
             return;
         }
@@ -58,12 +61,11 @@ impl Map {
 
         let startmx = time::get_time();
         let mx = self.resize.write().unwrap();
-        println!("_ lock-acqusition {}", (time::get_time() - startmx).num_microseconds().unwrap());
 
         // we need to check that no-one else fixed the map while we were waiting for the lock
         if self.map.load(Ordering::SeqCst) != nowp {
             // someone else already resized the map
-            println!("map already grown");
+            debug!("map already grown");
             return;
         }
 
@@ -76,7 +78,7 @@ impl Map {
 
         let nsize = self.size.load(Ordering::SeqCst) << 1;
         let newm = Box::new(create(nsize));
-        println!("growing hashtable to {}", nsize);
+        info!("growing hashtable to {}", nsize);
 
         // copy over all the items
         // TODO: parallelize
@@ -95,7 +97,7 @@ impl Map {
 
         // swap in new map
         let newmp = unsafe { boxed::into_raw(newm) };
-        println!("updated primary mapref to {:?}", newmp);
+        trace!("updated primary mapref to {:?}", newmp);
         self.map.store(newmp, Ordering::SeqCst);
         self.size.store(nsize, Ordering::SeqCst);
 
@@ -105,11 +107,8 @@ impl Map {
 
     fn get_(&self) -> Mapref {
         let p = self.map.load(Ordering::SeqCst);
-        println!("primary mapref at {:?}?", p);
+        trace!("primary mapref at {:?}?", p);
         let m : &Mapref = unsafe { &*p };
-        if m.magic != 0x07 {
-            panic!("bad magic!");
-        }
         m.clone()
     }
 
@@ -126,7 +125,7 @@ impl Map {
             let r = map.insert(key, &upd);
 
             if r.0 == memcache::Status::ENOMEM {
-                println!("_ iterate {}", (time::get_time() - start).num_microseconds().unwrap());
+                debug!("_ iterate {}", (time::get_time() - start).num_microseconds().unwrap());
                 self.fix(nh, mx);
                 continue
             }
@@ -181,7 +180,7 @@ pub fn new(esize_in : usize) -> Map {
     if esize == 0 {
         esize = 1 << 16;
     }
-    println!("constructing map with {} slots", esize);
+    debug!("constructing map with {} slots", esize);
 
     // make esize a power of two
     if (esize&(esize-1)) != 0 {
@@ -192,11 +191,11 @@ pub fn new(esize_in : usize) -> Map {
         }
         esize = shift;
     }
-    println!("(actually {} slots)", esize);
+    trace!("(actually {} slots)", esize);
 
     let newm = Box::new(create(esize));
     let newmp = unsafe { boxed::into_raw(newm) };
-    println!("new primary mapref is {:?}", newmp);
+    trace!("new primary mapref is {:?}", newmp);
     let m = Map {
         resize : sync::RwLock::new(false),
         map    : AtomicPtr::new(newmp),
@@ -208,14 +207,13 @@ pub fn new(esize_in : usize) -> Map {
 fn create(esize : usize) -> sync::Arc<CuckooMap> {
     // since each bin can hold ASSOCIATIVITY elements we don't need as many bins
     let mut bins = esize >> bins::ASSOCIATIVITY_E;
-    println!("(so actually {} bins)", bins);
 
     if bins == 0 {
         bins = 1
     }
+    trace!("creating inner map with {} bins", bins);
 
     sync::Arc::new(CuckooMap {
-        magic   : 0x07,
         bins    : (0..bins as usize).map(|_| bins::Bin::default()).collect(),
         nhashes : AtomicUsize::new(2),
     })
@@ -233,25 +231,24 @@ struct Displacement {
 impl CuckooMap {
     /// get returns the current value (if any) for the given key
     pub fn get(&self, key : &[u8]) -> memcache::MapResult {
-        println!("asked to retrieve key {:?}", key);
+        debug!("asked to retrieve key {:?}", key);
 
         let now = time::get_time().sec;
         let bins : Vec<usize> = (0..self.nhashes.load(Ordering::Relaxed)).map(|n| self.nth_key_bin(key, n)).collect();
 
-        println!("bins are {:?}", bins);
+        trace!("bins are {:?}", bins);
 
         for bin in bins {
-            println!("checking bin {:?}", bin);
+            trace!("checking bin {:?}", bin);
             match self.bins[bin].has(key, now) {
                 Some((_, v)) => {
-                    println!("bin holds {:?}!", v);
                     return (memcache::Status::SUCCESS, Ok(Some(v)))
                 }
                 _ => {}
             }
         }
 
-        println!("none of the bins held our value :(");
+        trace!("none of the bins held our value :(");
         (memcache::Status::KEY_ENOENT, Err(None))
     }
 
@@ -272,18 +269,18 @@ impl CuckooMap {
     }
 
     pub fn insert(&self, key : &[u8], upd : &Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> memcache::MapResult {
-        println!("asked to do an insert of key {:?}", key);
-        println!("using {} hashes and {} bins", self.nhashes.load(Ordering::SeqCst), self.bins.len());
+        debug!("asked to do an insert of key {:?}", key);
+        trace!("using {} hashes and {} bins", self.nhashes.load(Ordering::SeqCst), self.bins.len());
 
         let now = time::get_time().sec;
         let mut bins = (0..self.nhashes.load(Ordering::SeqCst)).map(|n| self.nth_key_bin(key, n)).collect();
 
-        println!("bins are {:?}", bins);
+        trace!("bins are {:?}", bins);
 
         let mxs = self.lock_in_order(&bins);
         for (bi, b) in bins.iter().enumerate() {
             if let Some((i, v)) = self.bins[*b].has(key, now) {
-                println!("key already exists; overwriting");
+                debug!("key already exists; overwriting");
                 let r = upd(Some(&v.val));
                 match r.0 {
                     memcache::Status::SUCCESS => {
@@ -304,7 +301,7 @@ impl CuckooMap {
         }
         drop(mxs);
 
-        println!("key does not already exists");
+        trace!("key does not already exists");
 
         let (status, res) = upd(None);
         if status != memcache::Status::SUCCESS {
@@ -319,25 +316,25 @@ impl CuckooMap {
             panic!("received SUCCESS, but result was an error: {:?}", res);
         }
 
-        println!("upd for new entry on key {:?} returned value {:?}", key, res);
+        trace!("upd for new entry on key {:?} returned value {:?}", key, res);
         let mut newv = sync::Arc::new(slot::Value {
             bno: 0,
             key: key.to_vec(),
             val: res.unwrap(),
         });
 
-        println!("checking for direct insert");
+        trace!("checking for direct insert");
         for (bi, b) in bins.iter().enumerate() {
             if self.bins[*b].available(now) {
-                println!("bin {} has available slot", *b);
+                trace!("bin {} has available slot", *b);
                 match self.bins[*b].add(newv, bi as u8, now) {
-                    Ok(res) => { println!("got it -- done!"); return res; }
-                    Err(v) => { println!("add failed, darn..."); newv = v; }
+                    Ok(res) => { return res; }
+                    Err(v) => { trace!("add failed, darn..."); newv = v; }
                 }
             }
         }
 
-        println!("need to do a search");
+        trace!("need to do a search");
         loop {
             let path_ = self.search(&bins, now);
             match path_ {
@@ -348,7 +345,7 @@ impl CuckooMap {
             }
 
             let path = path_.unwrap();
-            println!("found path {:?}", path);
+            trace!("found path {:?}", path);
             let freeing = path[0].from;
 
             // recompute bins because #hashes might have changed
@@ -372,10 +369,13 @@ impl CuckooMap {
                     Err(v) => { newv = v; }
                 }
             }
+            trace!("search path validation failed");
         }
     }
 
     pub fn delete(&self, key : &[u8], casid : u64) -> memcache::MapResult {
+        debug!("asked to do delete key {:?}", key);
+
         let now = time::get_time().sec;
         let mut bins = (0..self.nhashes.load(Ordering::SeqCst)).map(|n| self.nth_key_bin(key, n)).collect();
         let mxs = self.lock_in_order(&mut bins);
