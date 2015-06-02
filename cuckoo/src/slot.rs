@@ -13,9 +13,3 @@ impl fmt::Display for Value {
         write!(f, "slot for key {:?} holding {}", self.key, self.val)
     }
 }
-
-impl Value {
-    pub fn holds(&self, key : Vec<u8>, now : i64) -> bool {
-        return self.val.present(now) && self.key == key
-    }
-}

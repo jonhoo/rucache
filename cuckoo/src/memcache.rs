@@ -22,6 +22,7 @@ impl Item {
     }
 }
 
+#[allow(non_camel_case_types)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Status {
     SUCCESS         = 0x00,
@@ -183,6 +184,7 @@ pub fn fdecr(by : u64, def : u64, expires : i64) -> Box<Fn(Option<&Item>) -> (St
 	return fpm(by, def, expires, false)
 }
 
+#[allow(dead_code)]
 pub fn ftouch(expires : i64) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
     Box::new(move |prev : Option<&Item>| {
         match prev {
