@@ -39,14 +39,20 @@ pub struct Bin {
 impl Bin {
     pub fn has(&self, key : &[u8], now : i64) -> Option<(usize, sync::Arc<slot::Value>)> {
         for i in 0..ASSOCIATIVITY {
+            println!("does slot {} contain the element?", i);
             match self.v(i, now) {
                 Some(v) => {
+                    println!("well, at least there's an element here...");
                     // NOTE: can't use guard when moving value
                     if v.key == key {
+                        println!("yay, same key!");
                         return Some((i, v))
                     }
+                    println!("nope, key differs ({:?} != {:?})", v.key, key);
                 }
-                _ => {}
+                _ => {
+                    println!("nope, the slot is empty");
+                }
             }
         }
 
@@ -85,9 +91,10 @@ impl Bin {
         // setv should *always* be called while holding locks for all bins that may hold this value
         // since everyone else considers slot::Values to be read-only, this means we should be the
         // only ones to modify it.
+        println!("setv: v is {:?}", v);
         unsafe {
-            let vv : &mut slot::Value = mem::transmute(&v);
-            vv.bno = bno;
+            let vb : &mut u8 = mem::transmute(&v.bno);
+            *vb = bno;
         }
 
         /* This is kind of tricky:
@@ -105,6 +112,7 @@ impl Bin {
          *    which will in turn free the underlying element.
          */
         let oldv = self.gc(i);
+        println!("subbing in {:?} for {:?}", v, oldv);
         self.vals[i].store(unsafe{ boxed::into_raw(Box::new(v.clone())) }, Ordering::SeqCst);
         drop(oldv);
 
@@ -114,7 +122,10 @@ impl Bin {
     pub fn subin(&self, v : sync::Arc<slot::Value>, bno : u8, now : i64) -> Result<memcache::MapResult, sync::Arc<slot::Value>> {
         for i in 0..ASSOCIATIVITY {
             match self.v(i, now) {
-                None => { return Ok(self.setv(i, v, bno)); }
+                None => {
+                    println!("found empty slot at {} for {:?}", i, v);
+                    return Ok(self.setv(i, v, bno));
+                }
                 _ => {}
             }
         }
@@ -130,7 +141,7 @@ impl Bin {
 
     pub fn available(&self, now : i64) -> bool {
         for i in 0..ASSOCIATIVITY {
-            if let Some(_) = self.v(i, now) {
+            if let None = self.v(i, now) {
                 return true;
             }
         }
@@ -139,6 +150,7 @@ impl Bin {
 
     pub fn add(&self, v : sync::Arc<slot::Value>, bno : u8, now : i64) -> Result<memcache::MapResult, sync::Arc<slot::Value>> {
         let x = self.mx.lock().unwrap();
+        println!("adding {:?}", v);
         let res = self.subin(v, bno, now);
         drop(x);
         res

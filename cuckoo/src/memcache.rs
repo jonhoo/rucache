@@ -22,7 +22,7 @@ impl Item {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Status {
     SUCCESS         = 0x00,
 	KEY_ENOENT      = 0x01,

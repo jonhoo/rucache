@@ -4,8 +4,11 @@
 #![feature(alloc)]
 
 extern crate time;
+extern crate rand;
 
 use std::sync;
+use rand::Rng;
+use std::thread;
 use std::hash::{Hash, Hasher, SipHasher};
 
 mod bins;
@@ -34,35 +37,35 @@ impl Map {
         self.map.read().unwrap().delete(key, casid)
     }
 
-    pub fn set(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+    pub fn set(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::fset(bytes, flags, expires, 0))
     }
 
-    pub fn add(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+    pub fn add(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::fadd(bytes, flags, expires))
     }
 
-    pub fn replace(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+    pub fn replace(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::freplace(bytes, flags, expires))
     }
 
-    pub fn append(&self, key : &Vec<u8>, bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
+    pub fn append(&self, key : &[u8], bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::fappend(bytes, casid))
     }
 
-    pub fn prepend(&self, key : &Vec<u8>, bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
+    pub fn prepend(&self, key : &[u8], bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::fprepend(bytes, casid))
     }
 
-    pub fn cas(&self, key : &Vec<u8>, bytes : Vec<u8>, flags : u32, expires : i64, casid : u64) -> memcache::MapResult {
+    pub fn cas(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64, casid : u64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::fset(bytes, flags, expires, casid))
     }
 
-    pub fn incr(&self, key : &Vec<u8>, by : u64, def : u64, expires : i64) -> memcache::MapResult {
+    pub fn incr(&self, key : &[u8], by : u64, def : u64, expires : i64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::fincr(by, def, expires))
     }
 
-    pub fn decr(&self, key : &Vec<u8>, by : u64, def : u64, expires : i64) -> memcache::MapResult {
+    pub fn decr(&self, key : &[u8], by : u64, def : u64, expires : i64) -> memcache::MapResult {
         self.map.read().unwrap().insert(key, memcache::fincr(by, def, expires))
     }
 }
@@ -72,6 +75,7 @@ pub fn new(esize_in : u64) -> Map {
     if esize == 0 {
         esize = 1 << 16;
     }
+    println!("constructing map with {} slots", esize);
 
     // make esize a power of two
     if (esize&(esize-1)) != 0 {
@@ -82,9 +86,11 @@ pub fn new(esize_in : u64) -> Map {
         }
         esize = shift;
     }
+    println!("(actually {} slots)", esize);
 
     // since each bin can hold ASSOCIATIVITY elements we don't need as many bins
     let mut bins = esize >> bins::ASSOCIATIVITY_E;
+    println!("(so actually {} bins)", bins);
 
     if bins == 0 {
         bins = 1
@@ -101,7 +107,7 @@ pub fn new(esize_in : u64) -> Map {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Displacement {
 	v    : sync::Arc<slot::Value>,
 	from : usize,
@@ -113,18 +119,25 @@ struct Displacement {
 impl CuckooMap {
     /// get returns the current value (if any) for the given key
     pub fn get(&self, key : &[u8]) -> memcache::MapResult {
+        println!("asked to retrieve key {:?}", key);
+
         let now = time::get_time().sec;
         let bins : Vec<usize> = (0..self.nhashes).map(|n| self.nth_key_bin(key, n)).collect();
 
+        println!("bins are {:?}", bins);
+
         for bin in bins {
+            println!("checking bin {:?}", bin);
             match self.bins[bin].has(key, now) {
                 Some((_, v)) => {
+                    println!("bin holds {:?}!", v);
                     return (memcache::Status::SUCCESS, Ok(Some(v)))
                 }
                 _ => {}
             }
         }
 
+        println!("none of the bins held our value :(");
         (memcache::Status::KEY_ENOENT, Err(None))
     }
 
@@ -144,23 +157,40 @@ impl CuckooMap {
         v
     }
 
-    pub fn insert(&self, key : &Vec<u8>, upd : Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> memcache::MapResult {
+    pub fn insert(&self, key : &[u8], upd : Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> memcache::MapResult {
+        println!("asked to do an insert of key {:?}", key);
+        println!("using {} hashes and {} bins", self.nhashes, self.bins.len());
+
         let now = time::get_time().sec;
-        let mut bins = (0..self.nhashes).map(|n| self.nth_key_bin(&key[..], n)).collect();
+        let mut bins = (0..self.nhashes).map(|n| self.nth_key_bin(key, n)).collect();
+
+        println!("bins are {:?}", bins);
 
         let mxs = self.lock_in_order(&bins);
         for (bi, b) in bins.iter().enumerate() {
-            if let Some((i, v)) = self.bins[*b].has(&key[..], now) {
-                if let (memcache::Status::SUCCESS, Ok(nv)) = upd(Some(&v.val)) {
-                    return self.bins[*b].setv(i, sync::Arc::new(slot::Value{
-                        key: key.to_vec(),
-                        bno: bi as u8,
-                        val: nv,
-                    }), bi as u8);
+            if let Some((i, v)) = self.bins[*b].has(key, now) {
+                println!("key already exists; overwriting");
+                let r = upd(Some(&v.val));
+                match r.0 {
+                    memcache::Status::SUCCESS => {
+                        return self.bins[*b].setv(i, sync::Arc::new(slot::Value{
+                            key: key.to_vec(),
+                            bno: bi as u8,
+                            val: r.1.unwrap(),
+                        }), bi as u8);
+                    }
+                    s => {
+                        match r.1 {
+                            Ok(_) => { panic!("got failure, but Ok value!"); }
+                            Err(x) => { return (s, Err(x)); }
+                        }
+                    }
                 }
             }
         }
         drop(mxs);
+
+        println!("key does not already exists");
 
         let (status, res) = upd(None);
         if status != memcache::Status::SUCCESS {
@@ -175,20 +205,25 @@ impl CuckooMap {
             panic!("received SUCCESS, but result was an error: {:?}", res);
         }
 
+        println!("upd for new entry on key {:?} returned value {:?}", key, res);
         let mut newv = sync::Arc::new(slot::Value {
             bno: 0,
             key: key.to_vec(),
             val: res.unwrap(),
         });
+
+        println!("checking for direct insert");
         for (bi, b) in bins.iter().enumerate() {
             if self.bins[*b].available(now) {
+                println!("bin {} has available slot", *b);
                 match self.bins[*b].add(newv, bi as u8, now) {
-                    Ok(res) => { return res; }
-                    Err(v) => { newv = v; }
+                    Ok(res) => { println!("got it -- done!"); return res; }
+                    Err(v) => { println!("add failed, darn..."); newv = v; }
                 }
             }
         }
 
+        println!("need to do a search");
         loop {
             let path_ = self.search(&bins, now);
             match path_ {
@@ -199,6 +234,7 @@ impl CuckooMap {
             }
 
             let path = path_.unwrap();
+            println!("found path {:?}", path);
             let freeing = path[0].from;
 
             // recompute bins because #hashes might have changed
@@ -345,4 +381,38 @@ impl CuckooMap {
         }
         true
 	}
+}
+
+#[cfg(test)]
+fn setget(m : &Map, key : &[u8], val : Vec<u8>) -> sync::Arc<slot::Value> {
+    let mut r = m.set(key, val.to_vec(), 0, 0);
+    assert_eq!(r.0, memcache::Status::SUCCESS);
+    r = m.get(key);
+    assert_eq!(r.0, memcache::Status::SUCCESS);
+
+    let r2 = r.1.unwrap().unwrap();
+    assert_eq!(r2.val.bytes, val);
+    r2
+}
+
+#[test]
+fn it_works() {
+    let m = new(1 << 10);
+    let key : &[u8] = &['x' as u8; 1];
+    let val = Vec::<u8>::from("y");
+    let mut r = m.get(key);
+    assert_eq!(r.0, memcache::Status::KEY_ENOENT);
+
+    let v = setget(&m, key, val.to_vec());
+    r = m.delete(key, v.val.casid);
+    assert_eq!(r.0, memcache::Status::SUCCESS);
+
+    r = m.get(key);
+    assert_eq!(r.0, memcache::Status::KEY_ENOENT);
+
+    let mut rng = rand::thread_rng();
+    for i in 0..(1 << 9) {
+        let x = rng.gen::<u64>().to_string().into_bytes();
+        setget(&m, &x[..], i.to_string().into_bytes());
+    }
 }
