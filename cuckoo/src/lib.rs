@@ -599,9 +599,9 @@ fn it_handles_some_keys() {
 
 #[test]
 fn it_handles_resizes() {
-    let m = new(1 << 5);
+    let m = new(1 << 9);
     let mut rng = rand::thread_rng();
-    for i in 0..(1 << 6) {
+    for i in 0..(1 << 10) {
         let x = rng.gen::<u64>().to_string().into_bytes();
         setget(&m, &x[..], i.to_string().into_bytes());
     }

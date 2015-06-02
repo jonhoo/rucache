@@ -18,28 +18,46 @@ impl Default for Bin {
         Bin {
             mx: sync::Mutex::new(Void),
             vals: [
-                AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()),
-                AtomicPtr::new(ptr::null_mut()),
+                BinVal::default(),
+                BinVal::default(),
+                BinVal::default(),
+                BinVal::default(),
+                BinVal::default(),
+                BinVal::default(),
+                BinVal::default(),
+                BinVal::default(),
             ],
+        }
+    }
+}
+
+struct BinVal {
+    val : AtomicPtr<sync::Arc<slot::Value>>,
+    tag : u8,
+}
+
+impl Default for BinVal {
+    fn default() -> BinVal {
+        BinVal {
+            val: AtomicPtr::new(ptr::null_mut()),
+            tag: 0,
         }
     }
 }
 
 pub struct Bin {
 	pub mx : sync::Mutex<Void>,
-    vals   : [AtomicPtr<sync::Arc<slot::Value>>; ASSOCIATIVITY],
+    vals   : [BinVal; ASSOCIATIVITY],
 }
 
 impl Bin {
     pub fn has(&self, key : &[u8], now : i64) -> Option<(usize, sync::Arc<slot::Value>)> {
         for i in 0..ASSOCIATIVITY {
             println!("does slot {} contain the element?", i);
+            if self.vals[i].tag != key[0] {
+                println!("nope, tag doesn't match");
+                continue;
+            }
             match self.v(i, now) {
                 Some(v) => {
                     println!("well, at least there's an element here...");
@@ -60,7 +78,7 @@ impl Bin {
     }
 
     pub fn v(&self, i : usize, now : i64) -> Option<sync::Arc<slot::Value>> {
-        let v = self.vals[i].load(Ordering::Relaxed);
+        let v = self.vals[i].val.load(Ordering::Relaxed);
 
         if v == ptr::null_mut() {
             return None
@@ -77,7 +95,7 @@ impl Bin {
 
     pub fn gc(&self, i : usize) -> Option<Box<sync::Arc<slot::Value>>> {
         // garbage collect by taking ownership of the Arc, causing it to be dropped
-        let p = self.vals[i].load(Ordering::SeqCst);
+        let p = self.vals[i].val.load(Ordering::SeqCst);
 
         if p == ptr::null_mut() {
             return None
@@ -95,6 +113,8 @@ impl Bin {
         unsafe {
             let vb : &mut u8 = mem::transmute(&v.bno);
             *vb = bno;
+            let tag : &mut u8 = mem::transmute(&self.vals[i].tag);
+            *tag = v.key[0];
         }
 
         /* This is kind of tricky:
@@ -113,7 +133,7 @@ impl Bin {
          */
         let oldv = self.gc(i);
         println!("subbing in {:?} for {:?}", v, oldv);
-        self.vals[i].store(unsafe{ boxed::into_raw(Box::new(v.clone())) }, Ordering::SeqCst);
+        self.vals[i].val.store(unsafe{ boxed::into_raw(Box::new(v.clone())) }, Ordering::SeqCst);
         drop(oldv);
 
         (memcache::Status::SUCCESS, Ok(Some(v)))
@@ -135,7 +155,7 @@ impl Bin {
 
     pub fn kill(&self, i : usize) {
         let oldv = self.gc(i);
-        self.vals[i as usize].store(ptr::null_mut(), Ordering::SeqCst);
+        self.vals[i as usize].val.store(ptr::null_mut(), Ordering::SeqCst);
         drop(oldv);
     }
 
