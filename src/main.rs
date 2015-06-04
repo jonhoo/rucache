@@ -106,6 +106,7 @@ fn read_full(r : &mut io::Read, to : &mut [u8]) -> Result<(), io::Error> {
     let mut nread = 0 as usize;
     while nread < to.len() {
         match r.read(&mut to[nread..]) {
+            Ok(n) if n == 0 => { return Err(std::io::Error::new(std::io::ErrorKind::ConnectionAborted, "")); }
             Ok(n) => { nread += n; }
             Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {},
             Err(e) => return Err(From::from(e))
@@ -114,7 +115,7 @@ fn read_full(r : &mut io::Read, to : &mut [u8]) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream) {
+fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream) -> bool {
     let mut rh = memcache::ResponseHeader::from_req(req);
     match memcache::Command::from_u8(req.op) {
         Some(op) => {
@@ -131,7 +132,7 @@ fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream)
                     m.touchall(tm);
 
                     rh.status = memcache::Status::SUCCESS as u16;
-                    rh.construct(&[], &[], &[]).transmit(c);
+                    rh.construct(&[], &[], &[]).transmit(c)
                 }
                 memcache::Command::SET
                 | memcache::Command::ADD
@@ -157,11 +158,11 @@ fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream)
                         rh.cas = v.val.casid;
                     }
 
-                    rh.construct(&[], &[], &[]).transmit(c);
+                    rh.construct(&[], &[], &[]).transmit(c)
                 }
                 memcache::Command::DELETE => {
                     rh.status = m.delete(key, req.cas).0 as u16;
-                    rh.construct(&[], &[], &[]).transmit(c);
+                    rh.construct(&[], &[], &[]).transmit(c)
                 }
                 memcache::Command::INCREMENT
                 | memcache::Command::DECREMENT
@@ -181,9 +182,9 @@ fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream)
                         BigEndian::write_u64(&mut extras[..], u64::from_str(str::from_utf8(&v.val.bytes[..]).unwrap()).unwrap());
 
                         rh.cas = v.val.casid;
-                        rh.construct(&extras[..], &[], &[]).transmit(c);
+                        rh.construct(&extras[..], &[], &[]).transmit(c)
                     } else {
-                        rh.construct(&[], &[], &[]).transmit(c);
+                        rh.construct(&[], &[], &[]).transmit(c)
                     }
                 }
                 memcache::Command::GET | memcache::Command::GETK => {
@@ -198,10 +199,10 @@ fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream)
                             &extras[..],
                             if op.noq() == memcache::Command::GETK {key} else {&[]},
                             &v.val.bytes[..]
-                        ).transmit(c);
+                        ).transmit(c)
                     } else {
-                        rh.construct(&[], &[], &[]).transmit(c);
-                    };
+                        rh.construct(&[], &[], &[]).transmit(c)
+                    }
                 }
                 memcache::Command::APPEND | memcache::Command::PREPEND => {
                     // XXX: unfortunate copy...
@@ -217,36 +218,36 @@ fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream)
                         rh.cas = v.val.casid;
                     }
 
-                    rh.construct(&[], &[], &[]).transmit(c);
+                    rh.construct(&[], &[], &[]).transmit(c)
                 }
                 memcache::Command::VERSION => {
                     rh.status = memcache::Status::SUCCESS as u16;
-                    rh.construct(&[], &[], "0.1.0".as_bytes()).transmit(c);
+                    rh.construct(&[], &[], "0.1.0".as_bytes()).transmit(c)
                 }
                 memcache::Command::NOOP => {
                     rh.status = memcache::Status::SUCCESS as u16;
-                    rh.construct(&[], &[], &[]).transmit(c);
+                    rh.construct(&[], &[], &[]).transmit(c)
                 }
                 _ => {
+                    warn!("client sent unhandled command: {:?}", op);
                     rh.status = memcache::Status::EINVAL as u16;
-                    rh.construct(&[], &[], &[]).transmit(c);
-                    panic!("client sent valid (but unhandled) command: {:?}", op);
+                    rh.construct(&[], &[], &[]).transmit(c)
                 }
             }
         }
         None => {
             rh.status = memcache::Status::UNKNOWN_COMMAND as u16;
-            rh.construct(&[], &[], &[]).transmit(c);
+            rh.construct(&[], &[], &[]).transmit(c)
         }
-    };
+    }
 }
 
 fn handle_client(m : &cucache::Map, mut c : net::TcpStream) {
     let mut magic = [0_u8; 1];
     let mut body = Vec::with_capacity(100);
-    loop {
+    'outer: loop {
         if let Err(_) = read_full(&mut c, &mut magic) {
-            return
+            break 'outer;
         }
 
         unsafe { body.set_len(100); }
@@ -259,7 +260,7 @@ fn handle_client(m : &cucache::Map, mut c : net::TcpStream) {
                 // memcache request
                 body[0] = magic[0];
                 if let Err(_) = read_full(&mut c, &mut body[1..24]) {
-                    return
+                    break 'outer;
                 }
 
                 let blen = BigEndian::read_u32(&body[8..12]) as usize;
@@ -267,21 +268,25 @@ fn handle_client(m : &cucache::Map, mut c : net::TcpStream) {
                 unsafe { body.set_len(24 + blen); }
 
                 if let Err(_) = read_full(&mut c, &mut body[24..(24+blen)]) {
-                    return
+                    break 'outer;
                 }
 
                 let req = memcache::Request::parse(&mut body[..]);
-                execute(m, req, &mut c);
+                if !execute(m, req, &mut c) {
+                    break 'outer;
+                }
             }
             0x81 => {
                 warn!("expected request from client, got response magic");
-                return
+                break 'outer;
             }
             _ => {
                 // text protocol
             }
         }
-    }
+    };
+
+    info!("client {:?} hung up", c);
 }
 
 fn handle_clients(m : &cucache::Map, rxmx : &sync::Mutex<mpsc::Receiver<net::TcpStream>>) {

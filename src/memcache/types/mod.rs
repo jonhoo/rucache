@@ -125,12 +125,12 @@ impl ResponseHeader {
 }
 
 impl<'a> ResponseSet<'a> {
-    pub fn transmit(mut self, to : &mut io::Write) {
+    pub fn transmit(mut self, to : &mut io::Write) -> bool {
         if let Some(op) = constants::Command::from_u8(self.hdr.op) {
             if op == constants::Command::GETQ || op == constants::Command::GETKQ {
                 if self.hdr.status == constants::Status::KEY_ENOENT as u16 {
                     // no output on cache miss
-                    return;
+                    return true;
                 }
             }
         }
@@ -147,16 +147,20 @@ impl<'a> ResponseSet<'a> {
         BigEndian::write_u32(&mut buf[8..12], self.hdr.blen);
         BigEndian::write_u32(&mut buf[12..16], self.hdr.opq);
         BigEndian::write_u64(&mut buf[16..24], self.hdr.cas);
-        to.write_all(buf);
-        to.write_all(self.extras);
-        to.write_all(self.key);
-        to.write_all(self.body);
+
+        if let Err(_) = to.write_all(buf) { return false; }
+        if let Err(_) = to.write_all(self.extras) { return false; }
+        if let Err(_) = to.write_all(self.key) { return false; }
+        if let Err(_) = to.write_all(self.body) { return false; }
 
         if let Some(op) = constants::Command::from_u8(self.hdr.op) {
             if !op.quiet() || res != 0 {
-                to.flush();
+                if let Err(_) = to.flush() {
+                    return false;
+                }
             }
         }
+        true
     }
 }
 
