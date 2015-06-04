@@ -77,7 +77,7 @@ fn main() {
     info!("spinning up worker pool");
     let (tx, rx) = mpsc::channel();
     let rxmx = sync::Mutex::new(rx);
-    let pool : Vec<thread::JoinGuard<()>> = (1..100).map(|_| {
+    let pool : Vec<thread::JoinGuard<()>> = (1..1000).map(|_| {
         let map = &m;
         let rxl = &rxmx;
         thread::scoped(move || {
