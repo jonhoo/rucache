@@ -36,7 +36,7 @@ fn from_mctime(i : u32) -> i64 {
 
 fn main() {
     let _ = log::set_logger(|max_log_level| {
-        max_log_level.set(LogLevelFilter::Debug);
+        max_log_level.set(LogLevelFilter::Warn);
         Box::new(SimpleLogger)
     });
 
@@ -309,7 +309,7 @@ fn handle_clients(m : &cucache::Map, rxmx : &sync::Mutex<mpsc::Receiver<net::Tcp
 struct SimpleLogger;
 impl log::Log for SimpleLogger {
     fn enabled(&self, metadata: &LogMetadata) -> bool {
-        metadata.level() <= LogLevel::Debug
+        metadata.level() <= LogLevel::Warn
     }
 
     #[allow(unused_must_use)]
