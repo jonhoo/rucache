@@ -34,7 +34,7 @@ impl Request {
         req.blen = BigEndian::read_u32(&buf[8..12]);
         req.opq = BigEndian::read_u32(&buf[12..16]);
         req.cas = BigEndian::read_u64(&buf[16..24]);
-        println!("{:?}", req);
+        debug!("{:?}", req);
         req
     }
 
@@ -137,7 +137,7 @@ impl<'a> ResponseSet<'a> {
 
         let res = self.hdr.status;
 
-        println!("{:?}", self);
+        debug!("{:?}", self);
         let buf = unsafe {
             let ptr : *mut u8 = mem::transmute(&mut self.hdr);
             slice::from_raw_parts_mut(ptr, 24)

@@ -121,7 +121,7 @@ impl Map {
         self.size.store(nsize, Ordering::SeqCst);
 
         drop(mx);
-        println!("_ resize {}", (time::get_time() - start).num_microseconds().unwrap());
+        //println!("_ resize {}", (time::get_time() - start).num_microseconds().unwrap());
     }
 
     fn get_(&self) -> Mapref {
@@ -137,18 +137,18 @@ impl Map {
     }
 
     fn op(&self, key : &[u8], upd : Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> MapResult {
-        let start = time::get_time();
+        //let start = time::get_time();
         loop {
             let (mx, map) = self.getm();
             let nh = map.nhashes.load(Ordering::SeqCst);
             let r = map.insert(key, &upd);
 
             if r.0 == memcache::Status::ENOMEM {
-                debug!("_ iterate {}", (time::get_time() - start).num_microseconds().unwrap());
+                //debug!("_ iterate {}", (time::get_time() - start).num_microseconds().unwrap());
                 self.fix(nh, mx);
                 continue
             }
-            println!("_ insert {}", (time::get_time() - start).num_microseconds().unwrap());
+            //println!("_ insert {}", (time::get_time() - start).num_microseconds().unwrap());
             return r;
         }
     }
