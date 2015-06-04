@@ -1,0 +1,34 @@
+{
+	"build": "cargo build --release",
+	"checkout": "master",
+	"experiment": "Vary cores",
+	"keep-stdout": true,
+	"iterations": 20,
+	"parallelism": 1,
+	"versions": {
+		"cucache-$cores": {
+			"vary": {
+				"cores": "set(1,2,4,6,8,10,12,14,16,18,20)"
+			},
+			"arguments": [
+				"$SRC/benchmark/bench.sh",
+				"$cores",
+				"28",
+				"$SRC/target/release/cucache"
+			]
+		},
+		"memcached-$cores": {
+			"vary": {
+				"cores": "set(1,2,4,6,8,10,12,14,16,18,20)"
+			},
+			"arguments": [
+				"$SRC/benchmark/bench.sh",
+				"$cores",
+				"28",
+				"memcached",
+				"-t",
+				"SCORES"
+			]
+		}
+	}
+}
