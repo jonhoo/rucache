@@ -11,6 +11,7 @@ extern crate byteorder;
 #[macro_use]
 extern crate log;
 
+use std::ptr;
 use std::sync;
 use std::boxed;
 use std::sync::Arc;
@@ -46,6 +47,18 @@ pub struct Map {
 }
 
 unsafe impl Sync for Map { }
+
+impl Drop for Map {
+    fn drop(&mut self) {
+        if let Ok(_) = self.resize.write() {
+            let gc : Box<Mapref> = unsafe { Box::from_raw(self.map.load(Ordering::SeqCst)) };
+            self.map.store(ptr::null_mut(), Ordering::SeqCst);
+            self.size.store(0, Ordering::SeqCst);
+            // TODO: what about concurrent gets?
+            drop(gc);
+        }
+    }
+}
 
 impl Map {
     fn fix(&self, nhashes : usize, rlock : RwLockReadGuard<bool>) {

@@ -50,6 +50,18 @@ pub struct Bin {
     vals   : [BinVal; ASSOCIATIVITY],
 }
 
+impl Drop for Bin {
+    fn drop(&mut self) {
+        if let Ok(_) = self.mx.lock() {
+            for i in 0..ASSOCIATIVITY {
+                let v = self.gc(i);
+                self.vals[i].val.store(ptr::null_mut(), Ordering::SeqCst);
+                drop(v);
+            }
+        }
+    }
+}
+
 impl Bin {
     pub fn has(&self, key : &[u8], now : i64) -> Option<(usize, sync::Arc<slot::Value>)> {
         for i in 0..ASSOCIATIVITY {
