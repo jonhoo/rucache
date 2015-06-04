@@ -106,15 +106,15 @@ fn fjoin(bytes : Vec<u8>, prepend : bool, casid : u64) -> Box<Fn(Option<&Item>) 
                 }))}
             None => { (Status::KEY_ENOENT, Err(None)) }
         }
-	})
+    })
 }
 
 pub fn fappend(bytes : Vec<u8>, casid : u64) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
-	fjoin(bytes, false, casid)
+    fjoin(bytes, false, casid)
 }
 
 pub fn fprepend(bytes : Vec<u8>, casid : u64) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
-	fjoin(bytes, true, casid)
+    fjoin(bytes, true, casid)
 }
 
 fn fpm(by : u64, def : u64, expires : i64, plus : bool) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
@@ -157,15 +157,15 @@ fn fpm(by : u64, def : u64, expires : i64, plus : bool) -> Box<Fn(Option<&Item>)
                     expires: expires,
                 }))}
         }
-	})
+    })
 }
 
 pub fn fincr(by : u64, def : u64, expires : i64) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
-	return fpm(by, def, expires, true)
+    return fpm(by, def, expires, true)
 }
 
 pub fn fdecr(by : u64, def : u64, expires : i64) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
-	return fpm(by, def, expires, false)
+    return fpm(by, def, expires, false)
 }
 
 #[allow(dead_code)]

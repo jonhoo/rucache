@@ -11,16 +11,16 @@ pub mod constants;
 
 #[repr(C)]
 pub struct Request {
-	magic : u8,
-	pub op    : u8,
-	klen  : u16,
-	elen  : u8,
-	dt    : u8,
-	pub vb    : u16,
-	blen  : u32,
-	opq   : u32,
-	pub cas   : u64,
-	// Command extras, key, and body follow
+    magic : u8,
+    pub op    : u8,
+    klen  : u16,
+    elen  : u8,
+    dt    : u8,
+    pub vb    : u16,
+    blen  : u32,
+    opq   : u32,
+    pub cas   : u64,
+    // Command extras, key, and body follow
     data  : [u8; 0],
 }
 
@@ -69,15 +69,15 @@ impl fmt::Debug for Request {
 
 #[repr(C)]
 pub struct ResponseHeader {
-	magic : u8,
-	pub op    : u8,
-	klen  : u16,
-	elen  : u8,
-	pub dt    : u8,
-	pub status: u16,
-	blen  : u32,
-	pub opq   : u32,
-	pub cas   : u64,
+    magic : u8,
+    pub op    : u8,
+    klen  : u16,
+    elen  : u8,
+    pub dt    : u8,
+    pub status: u16,
+    blen  : u32,
+    pub opq   : u32,
+    pub cas   : u64,
 }
 
 pub struct ResponseSet<'a> {

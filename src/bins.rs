@@ -46,7 +46,7 @@ impl Default for BinVal {
 }
 
 pub struct Bin {
-	pub mx : sync::Mutex<Void>,
+    pub mx : sync::Mutex<Void>,
     vals   : [BinVal; ASSOCIATIVITY],
 }
 

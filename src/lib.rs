@@ -34,8 +34,8 @@ const MAX_HASHES : usize = 10;
 const MAX_SEARCH_DEPTH : usize = 100;
 
 struct CuckooMap {
-	bins    : Vec<bins::Bin>,
-	nhashes : AtomicUsize,
+    bins    : Vec<bins::Bin>,
+    nhashes : AtomicUsize,
 }
 
 type Mapref = sync::Arc<CuckooMap>;
@@ -43,8 +43,8 @@ pub type MapResult = (memcache::Status, Result<sync::Arc<slot::Value>, Option<St
 
 pub struct Map {
     resize : sync::RwLock<bool>,
-	map    : AtomicPtr<Mapref>,
-	size   : AtomicUsize,
+    map    : AtomicPtr<Mapref>,
+    size   : AtomicUsize,
 }
 
 unsafe impl Sync for Map { }
@@ -244,11 +244,11 @@ fn create(esize : usize) -> sync::Arc<CuckooMap> {
 
 #[derive(Clone, Debug)]
 struct Displacement {
-	v    : sync::Arc<slot::Value>,
-	from : usize,
+    v    : sync::Arc<slot::Value>,
+    from : usize,
     ki   : usize,
-	to   : usize,
-	tobn : usize,
+    to   : usize,
+    tobn : usize,
 }
 
 impl CuckooMap {
@@ -538,7 +538,7 @@ impl CuckooMap {
             self.bins[mv.from].kill(mv.ki);
         }
         true
-	}
+    }
 }
 
 struct CuckooIterator<'a> {
