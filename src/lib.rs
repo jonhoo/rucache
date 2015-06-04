@@ -16,12 +16,39 @@ use std::ptr;
 use std::sync;
 use std::boxed;
 use std::sync::Arc;
-use std::hash::{Hash, Hasher, SipHasher};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering;
 use std::sync::{RwLockReadGuard, MutexGuard};
 
+const OFFSET64 : u64 = 14695981039346656037;
+const PRIME64 : u64 = 1099511628211;
+
+macro_rules! get_bin {
+    ($this:ident, $key:expr, $n:expr) => {
+        {
+            let mut khash : u64 = OFFSET64;
+            for b in $key {
+                khash ^= *b as u64;
+                khash *= PRIME64;
+            }
+            ((khash ^ ($n as u64)) * PRIME64) as usize % $this.bins.len()
+        }
+    }
+}
+
+macro_rules! get_bins {
+    ($this:ident, $key:expr) => {
+        {
+            let mut khash : u64 = OFFSET64;
+            for b in $key {
+                khash ^= *b as u64;
+                khash *= PRIME64;
+            }
+            (0..$this.nhashes.load(Ordering::Relaxed)).map(|n| ((khash ^ n as u64) * PRIME64) as usize % $this.bins.len()).collect::<Vec<usize>>()
+        }
+    }
+}
 
 #[cfg(test)]
 use rand::Rng;
@@ -257,7 +284,7 @@ impl CuckooMap {
         debug!("asked to retrieve key {:?}", key);
 
         let now = time::get_time().sec;
-        let bins : Vec<usize> = (0..self.nhashes.load(Ordering::Relaxed)).map(|n| self.nth_key_bin(key, n)).collect();
+        let bins = get_bins!(self, key);
 
         trace!("bins are {:?}", bins);
 
@@ -313,7 +340,7 @@ impl CuckooMap {
         trace!("using {} hashes and {} bins", self.nhashes.load(Ordering::SeqCst), self.bins.len());
 
         let now = time::get_time().sec;
-        let mut bins = (0..self.nhashes.load(Ordering::SeqCst)).map(|n| self.nth_key_bin(key, n)).collect();
+        let mut bins = get_bins!(self, key);
 
         trace!("bins are {:?}", bins);
 
@@ -391,7 +418,7 @@ impl CuckooMap {
             // recompute bins because #hashes might have changed
             let hashes = self.nhashes.load(Ordering::SeqCst);
             if bins.len() != hashes { 
-                bins = (0..hashes).map(|n| self.nth_key_bin(&newv.key[..], n)).collect();
+                bins = get_bins!(self, &newv.key[..]);
             }
 
             // sanity check that this path will make room in the right bin
@@ -417,7 +444,7 @@ impl CuckooMap {
         debug!("asked to do delete key {:?}", key);
 
         let now = time::get_time().sec;
-        let mut bins = (0..self.nhashes.load(Ordering::SeqCst)).map(|n| self.nth_key_bin(key, n)).collect();
+        let mut bins = get_bins!(self, key);
         let mxs = self.lock_in_order(&mut bins);
 
         let mut res : MapResult = (memcache::Status::KEY_ENOENT, Err(None));
@@ -436,13 +463,6 @@ impl CuckooMap {
             drop(mx)
         }
         res
-    }
-
-    fn nth_key_bin(&self, key : &[u8], n : usize) -> usize {
-        let mut h = SipHasher::new();
-        key.hash(&mut h);
-        n.hash(&mut h);
-        h.finish() as usize % self.bins.len()
     }
 
     fn search(&self, bins : &Vec<usize>, now : i64) -> Option<Vec<Displacement>> {
@@ -482,7 +502,7 @@ impl CuckooMap {
             let hashes = self.nhashes.load(Ordering::SeqCst);
             for _ in 0..hashes {
                 mv.tobn = (mv.tobn + 1) % hashes;
-                mv.to = self.nth_key_bin(&mv.v.key[..], mv.tobn);
+                mv.to = get_bin!(self, &mv.v.key[..], mv.tobn);
                 // XXX: could potentially try all bins here and
                 // check each for available()? extra-broad
                 // search...
