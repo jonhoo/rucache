@@ -69,7 +69,10 @@ fn main() {
     }
 
     info!("listening on {}:tcp:{}", host, tcp_port);
-    let listener = net::TcpListener::bind((host, tcp_port)).unwrap();
+    let listener = net::TcpListener::bind((host, tcp_port));
+    if let Err(e) = listener {
+        panic!("failed to listen on port: {}", e);
+    }
 
     info!("allocating map");
     let m = rucache::new(1 << 10);
@@ -86,7 +89,7 @@ fn main() {
     }).collect();
 
     info!("accepting connections");
-    for stream in listener.incoming() {
+    for stream in listener.unwrap().incoming() {
         match stream {
             Ok(stream) => {
                 if let Err(e) = tx.send(stream) {
