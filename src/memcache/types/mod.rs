@@ -34,27 +34,28 @@ impl Request {
         req.blen = BigEndian::read_u32(&buf[8..12]);
         req.opq = BigEndian::read_u32(&buf[12..16]);
         req.cas = BigEndian::read_u64(&buf[16..24]);
+        println!("{:?}", req);
         req
     }
 
     pub fn body<'a>(&'a self) -> &'a [u8] {
         let prelen = self.elen as isize + self.klen as isize;
         unsafe {
-            let ptr : *const u8 = mem::transmute::<&[u8; 0], *const u8>(&self.data);
+            let ptr : *const u8 = mem::transmute(&self.data);
             slice::from_raw_parts(ptr.offset(prelen), (self.blen as isize - prelen) as usize)
         }
     }
 
     pub fn extras<'a>(&'a self) -> &'a [u8] {
         unsafe {
-            let ptr : *const u8 = mem::transmute::<&[u8; 0], *const u8>(&self.data);
+            let ptr : *const u8 = mem::transmute(&self.data);
             slice::from_raw_parts(ptr, self.elen as usize)
         }
     }
 
     pub fn key<'a>(&'a self) -> &'a [u8] {
         unsafe {
-            let ptr : *const u8 = mem::transmute::<&[u8; 0], *const u8>(&self.data);
+            let ptr : *const u8 = mem::transmute(&self.data);
             slice::from_raw_parts(ptr.offset(self.elen as isize), self.klen as usize)
         }
     }
@@ -125,7 +126,22 @@ impl ResponseHeader {
 
 impl<'a> ResponseSet<'a> {
     pub fn transmit(mut self, to : &mut io::Write) {
-        let buf : &mut [u8; 0] = unsafe{ mem::transmute(&mut self.hdr) };
+        if let Some(op) = constants::Command::from_u8(self.hdr.op) {
+            if op == constants::Command::GETQ || op == constants::Command::GETKQ {
+                if self.hdr.status == constants::Status::KEY_ENOENT as u16 {
+                    // no output on cache miss
+                    return;
+                }
+            }
+        }
+
+        let res = self.hdr.status;
+
+        println!("{:?}", self);
+        let buf = unsafe {
+            let ptr : *mut u8 = mem::transmute(&mut self.hdr);
+            slice::from_raw_parts_mut(ptr, 24)
+        };
         BigEndian::write_u16(&mut buf[2..4], self.hdr.klen);
         BigEndian::write_u16(&mut buf[6..8], self.hdr.status);
         BigEndian::write_u32(&mut buf[8..12], self.hdr.blen);
@@ -135,8 +151,9 @@ impl<'a> ResponseSet<'a> {
         to.write_all(self.extras);
         to.write_all(self.key);
         to.write_all(self.body);
+
         if let Some(op) = constants::Command::from_u8(self.hdr.op) {
-            if op.quiet() {
+            if !op.quiet() || res != 0 {
                 to.flush();
             }
         }
@@ -149,3 +166,8 @@ impl fmt::Debug for ResponseHeader {
     }
 }
 
+impl<'a> fmt::Debug for ResponseSet<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.hdr.fmt(f)
+    }
+}

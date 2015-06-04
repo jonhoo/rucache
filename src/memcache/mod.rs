@@ -29,15 +29,15 @@ impl Item {
 pub fn fset(bytes : Vec<u8>, flags : u32, expires : i64, casid : u64) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
     Box::new(move |prev : Option<&Item>| {
         match prev {
+            None if casid != 0 => (Status::KEY_ENOENT, Err(None)),
+            Some(ref v) if casid != 0 && v.casid != casid => (Status::KEY_EEXISTS, Err(None)),
+
             None => { (Status::SUCCESS, Ok(Item {
                 bytes: bytes.to_vec(),
                 flags: flags,
                 casid: 1,
                 expires: expires,
             }))}
-            Some(ref v) if casid != 0 && v.casid != casid => {
-                (Status::KEY_EEXISTS, Err(None))
-            }
             Some(ref v) => { (Status::SUCCESS, Ok(Item {
                 bytes: bytes.to_vec(),
                 flags: flags,

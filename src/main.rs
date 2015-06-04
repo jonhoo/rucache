@@ -4,6 +4,7 @@ extern crate cucache;
 use cucache::memcache;
 
 extern crate getopts;
+extern crate time;
 extern crate byteorder;
 use byteorder::{BigEndian, ByteOrder};
 
@@ -20,9 +21,18 @@ use std::process;
 use std::sync;
 use std::sync::mpsc;
 use std::io;
+use std::str;
 
 extern crate num;
 use num::traits::FromPrimitive;
+
+fn from_mctime(i : u32) -> i64 {
+    if i > 0 && i < 30*24*60*60 {
+        time::get_time().sec + i as i64
+    } else {
+        i as i64
+    }
+}
 
 fn main() {
     let _ = log::set_logger(|max_log_level| {
@@ -67,7 +77,7 @@ fn main() {
     info!("spinning up worker pool");
     let (tx, rx) = mpsc::channel();
     let rxmx = sync::Mutex::new(rx);
-    let pool : Vec<thread::JoinGuard<()>> = (1..10).map(|_| {
+    let pool : Vec<thread::JoinGuard<()>> = (1..100).map(|_| {
         let map = &m;
         let rxl = &rxmx;
         thread::scoped(move || {
@@ -97,7 +107,7 @@ fn read_full(r : &mut io::Read, to : &mut [u8]) -> Result<(), io::Error> {
     while nread < to.len() {
         match r.read(&mut to[nread..]) {
             Ok(n) => { nread += n; }
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {},
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {panic!("XXX")},
             Err(e) => return Err(From::from(e))
         }
     }
@@ -105,28 +115,122 @@ fn read_full(r : &mut io::Read, to : &mut [u8]) -> Result<(), io::Error> {
 }
 
 fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream) {
-    println!("got request {:?}", req);
     let mut rh = memcache::ResponseHeader::from_req(req);
     match memcache::Command::from_u8(req.op) {
         Some(op) => {
-            match op {
-                memcache::Command::GET
-                | memcache::Command::GETQ => {
-                    let v = m.get(req.key());
+            let key = req.key();
+            let extras = req.extras();
+            let body = req.body();
+
+            match op.noq() {
+                memcache::Command::FLUSH if extras.len() == 4 => {
+                    let mut tm = from_mctime(BigEndian::read_u32(extras));
+                    if tm == 0 {
+                        tm = time::get_time().sec;
+                    }
+                    m.touchall(tm);
+
+                    rh.status = memcache::Status::SUCCESS as u16;
+                    rh.construct(&[], &[], &[]).transmit(c);
+                }
+                memcache::Command::SET
+                | memcache::Command::ADD
+                | memcache::Command::REPLACE
+                if extras.len() == 8 => {
+                    let flags = BigEndian::read_u32(&extras[0..4]);
+                    let expires = from_mctime(BigEndian::read_u32(&extras[4..8]));
+
+                    // XXX: unfortunate copy...
+                    let b = body.to_vec();
+
+                    let res = match op.noq() {
+                        memcache::Command::SET if req.cas == 0 => m.set(key, b, flags, expires),
+                        memcache::Command::REPLACE if req.cas == 0 => m.replace(key, b, flags, expires),
+                        memcache::Command::ADD => m.add(key, b, flags, expires),
+                        memcache::Command::SET | memcache::Command::REPLACE | _ => {
+                            m.cas(key, b, flags, expires, req.cas)
+                        }
+                    };
+
+                    rh.status = res.0 as u16;
+                    if let (memcache::Status::SUCCESS, Ok(v)) = res {
+                        rh.cas = v.val.casid;
+                    }
+
+                    rh.construct(&[], &[], &[]).transmit(c);
+                }
+                memcache::Command::DELETE => {
+                    rh.status = m.delete(key, req.cas).0 as u16;
+                    rh.construct(&[], &[], &[]).transmit(c);
+                }
+                memcache::Command::INCREMENT
+                | memcache::Command::DECREMENT
+                if extras.len() == 20 => {
+                    let by = BigEndian::read_u64(&extras[0..8]);
+                    let def = BigEndian::read_u64(&extras[8..16]);
+                    let expires = from_mctime(BigEndian::read_u32(&extras[16..20]));
+
+                    let v = match op.noq() {
+                        memcache::Command::INCREMENT => m.incr(key, by, def, expires),
+                        memcache::Command::DECREMENT | _ => m.decr(key, by, def, expires),
+                    };
+
+                    rh.status = v.0 as u16;
+                    if let (memcache::Status::SUCCESS, Ok(v)) = v {
+                        let extras = &mut [0u8; 8];
+                        BigEndian::write_u64(&mut extras[..], u64::from_str(str::from_utf8(&v.val.bytes[..]).unwrap()).unwrap());
+
+                        rh.cas = v.val.casid;
+                        rh.construct(&extras[..], &[], &[]).transmit(c);
+                    } else {
+                        rh.construct(&[], &[], &[]).transmit(c);
+                    }
+                }
+                memcache::Command::GET | memcache::Command::GETK => {
+                    let v = m.get(key);
                     rh.status = v.0 as u16;
 
                     if let (memcache::Status::SUCCESS, Ok(v)) = v {
                         rh.cas = v.val.casid;
                         let extras = &mut [0u8; 4];
                         BigEndian::write_u32(&mut extras[..], v.val.flags);
-                        rh.construct(&extras[..], req.key(), &v.val.bytes[..]).transmit(c);
+                        rh.construct(
+                            &extras[..],
+                            if op.noq() == memcache::Command::GETK {key} else {&[]},
+                            &v.val.bytes[..]
+                        ).transmit(c);
                     } else {
                         rh.construct(&[], &[], &[]).transmit(c);
                     };
                 }
+                memcache::Command::APPEND | memcache::Command::PREPEND => {
+                    // XXX: unfortunate copy...
+                    let b = body.to_vec();
+
+                    let res = match op.noq() {
+                        memcache::Command::PREPEND => m.prepend(key, b, req.cas),
+                        memcache::Command::APPEND | _ => m.append(key, b, req.cas),
+                    };
+
+                    rh.status = res.0 as u16;
+                    if let (memcache::Status::SUCCESS, Ok(v)) = res {
+                        rh.cas = v.val.casid;
+                    }
+
+                    rh.construct(&[], &[], &[]).transmit(c);
+                }
+                memcache::Command::VERSION => {
+                    rh.status = memcache::Status::SUCCESS as u16;
+                    rh.construct(&[], &[], "0.1.0".as_bytes()).transmit(c);
+                }
+                memcache::Command::NOOP => {
+                    rh.status = memcache::Status::SUCCESS as u16;
+                    rh.construct(&[], &[], &[]).transmit(c);
+                }
                 _ => {
-                    panic!("client sent valid (but unhandled) command: {:?}", op)
-                    // TODO: not yet handled
+                    rh.status = memcache::Status::EINVAL as u16;
+                    rh.construct(&[], &[], &[]).transmit(c);
+                    panic!("client sent valid (but unhandled) command: {:?}", op);
                 }
             }
         }
@@ -167,7 +271,6 @@ fn handle_client(m : &cucache::Map, mut c : net::TcpStream) {
                 }
 
                 let req = memcache::Request::parse(&mut body[..]);
-                println!("{:?}", req);
                 execute(m, req, &mut c);
             }
             0x81 => {
@@ -185,6 +288,7 @@ fn handle_clients(m : &cucache::Map, rxmx : &sync::Mutex<mpsc::Receiver<net::Tcp
     loop {
         if let Ok(rx) = rxmx.lock() {
             if let Ok(c) = rx.recv() {
+                drop(rx);
                 handle_client(&m, c);
             } else {
                 // channel receive error

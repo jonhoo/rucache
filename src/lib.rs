@@ -11,6 +11,7 @@ extern crate byteorder;
 #[macro_use]
 extern crate log;
 
+use std::mem;
 use std::ptr;
 use std::sync;
 use std::boxed;
@@ -19,7 +20,7 @@ use std::hash::{Hash, Hasher, SipHasher};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering;
-use std::sync::RwLockReadGuard;
+use std::sync::{RwLockReadGuard, MutexGuard};
 
 
 #[cfg(test)]
@@ -191,6 +192,10 @@ impl Map {
     pub fn decr(&self, key : &[u8], by : u64, def : u64, expires : i64) -> MapResult {
         self.op(key, memcache::fdecr(by, def, expires))
     }
+
+    pub fn touchall(&self, tm : i64) {
+        self.getm().1.touchall(tm);
+    }
 }
 
 pub fn new(esize_in : usize) -> Map {
@@ -268,6 +273,23 @@ impl CuckooMap {
 
         trace!("none of the bins held our value :(");
         (memcache::Status::KEY_ENOENT, Err(None))
+    }
+
+    #[allow(mutable_transmutes)]
+    pub fn touchall(&self, tm : i64) {
+        let mxs : Vec<MutexGuard<bins::Void>> = self.bins.iter().map(|b| b.mx.lock().unwrap()).collect();
+        for b in &self.bins {
+            for i in 0..bins::ASSOCIATIVITY {
+                if let Some(v) = b.v(i, tm) {
+                    // we have the write lock, so we can mutate
+                    unsafe {
+                        let vexp : &mut i64 = mem::transmute(&v.val.expires);
+                        *vexp = tm;
+                    }
+                }
+            }
+        }
+        drop(mxs);
     }
 
     fn lock_in_order(&self, bins_ : &Vec<usize>) -> Vec<(usize, sync::MutexGuard<bins::Void>)> {
@@ -402,7 +424,7 @@ impl CuckooMap {
         for (b, mx) in mxs {
             match self.bins[b].has(key, now) {
                 Some((i, v)) => {
-                    if v.val.casid != 0 && v.val.casid != casid {
+                    if casid != 0 && v.val.casid != casid {
                         return (memcache::Status::KEY_EEXISTS, Err(None));
                     }
 

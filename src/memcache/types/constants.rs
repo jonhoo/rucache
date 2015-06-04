@@ -83,26 +83,30 @@ pub enum Command {
 
 impl Command {
     pub fn quiet(&self) -> bool {
+        self.noq() != *self
+    }
+
+    pub fn noq(&self) -> Command {
         match *self {
-            Command::GETQ
-            | Command::GETKQ
-            | Command::SETQ
-            | Command::ADDQ
-            | Command::REPLACEQ
-            | Command::DELETEQ
-            | Command::INCREMENTQ
-            | Command::DECREMENTQ
-            | Command::QUITQ
-            | Command::FLUSHQ
-            | Command::APPENDQ
-            | Command::PREPENDQ
-            | Command::RSETQ
-            | Command::RAPPENDQ
-            | Command::RPREPENDQ
-            | Command::RDELETEQ
-            | Command::RINCRQ
-            | Command::RDECRQ => {true}
-            _ => {false}
+            Command::GETQ => {Command::GET}
+            Command::GETK => {Command::GETK}
+            Command::SET => {Command::SET}
+            Command::ADD => {Command::ADD}
+            Command::REPLACE => {Command::REPLACE}
+            Command::DELETE => {Command::DELETE}
+            Command::INCREMENT => {Command::INCREMENT}
+            Command::DECREMENT => {Command::DECREMENT}
+            Command::QUIT => {Command::QUIT}
+            Command::FLUSH => {Command::FLUSH}
+            Command::APPEND => {Command::APPEND}
+            Command::PREPEND => {Command::PREPEND}
+            Command::RSET => {Command::RSET}
+            Command::RAPPEND => {Command::RAPPEND}
+            Command::RPREPEND => {Command::RPREPEND}
+            Command::RDELETE => {Command::RDELETE}
+            Command::RINCR => {Command::RINCR}
+            Command::RDECR => {Command::RDECR}
+            v => {v}
         }
     }
 }
