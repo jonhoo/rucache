@@ -1,5 +1,5 @@
 [root]
-name = "cucache"
+name = "rucache"
 version = "0.1.0"
 dependencies = [
  "byteorder 0.3.10 (registry+https://github.com/rust-lang/crates.io-index)",

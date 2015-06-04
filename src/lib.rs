@@ -1,4 +1,4 @@
-#![crate_name = "cucache"]
+#![crate_name = "rucache"]
 #![crate_type = "lib"]
 #![feature(alloc)]
 

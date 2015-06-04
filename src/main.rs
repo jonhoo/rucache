@@ -1,7 +1,7 @@
 #![feature(scoped)]
 
-extern crate cucache;
-use cucache::memcache;
+extern crate rucache;
+use rucache::memcache;
 
 extern crate getopts;
 extern crate time;
@@ -72,7 +72,7 @@ fn main() {
     let listener = net::TcpListener::bind((host, tcp_port)).unwrap();
 
     info!("allocating map");
-    let m = cucache::new(1 << 10);
+    let m = rucache::new(1 << 10);
 
     info!("spinning up worker pool");
     let (tx, rx) = mpsc::channel();
@@ -115,7 +115,7 @@ fn read_full(r : &mut io::Read, to : &mut [u8]) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream) -> bool {
+fn execute(m : &rucache::Map, req : &memcache::Request, c : &mut net::TcpStream) -> bool {
     let mut rh = memcache::ResponseHeader::from_req(req);
     match memcache::Command::from_u8(req.op) {
         Some(op) => {
@@ -242,7 +242,7 @@ fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream)
     }
 }
 
-fn handle_client(m : &cucache::Map, mut c : net::TcpStream) {
+fn handle_client(m : &rucache::Map, mut c : net::TcpStream) {
     let mut magic = [0_u8; 1];
     let mut body = Vec::with_capacity(100);
     'outer: loop {
@@ -289,7 +289,7 @@ fn handle_client(m : &cucache::Map, mut c : net::TcpStream) {
     info!("client {:?} hung up", c);
 }
 
-fn handle_clients(m : &cucache::Map, rxmx : &sync::Mutex<mpsc::Receiver<net::TcpStream>>) {
+fn handle_clients(m : &rucache::Map, rxmx : &sync::Mutex<mpsc::Receiver<net::TcpStream>>) {
     loop {
         if let Ok(rx) = rxmx.lock() {
             if let Ok(c) = rx.recv() {
