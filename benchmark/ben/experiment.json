@@ -14,7 +14,7 @@
 				"$SRC/benchmark/bench.sh",
 				"$cores",
 				"28",
-				"$SRC/target/release/cucache"
+				"$SRC/target/release/rucache"
 			]
 		},
 		"memcached-$cores": {
