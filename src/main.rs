@@ -107,7 +107,7 @@ fn read_full(r : &mut io::Read, to : &mut [u8]) -> Result<(), io::Error> {
     while nread < to.len() {
         match r.read(&mut to[nread..]) {
             Ok(n) => { nread += n; }
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {panic!("XXX")},
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {},
             Err(e) => return Err(From::from(e))
         }
     }
