@@ -577,7 +577,7 @@ fn setget(m : &Map, key : &[u8], val : Vec<u8>) -> sync::Arc<slot::Value> {
     r = m.get(key);
     assert_eq!(r.0, memcache::Status::SUCCESS);
 
-    let r2 = r.1.unwrap().unwrap();
+    let r2 = r.1.unwrap();
     assert_eq!(r2.val.bytes, val);
     r2
 }
@@ -623,5 +623,4 @@ fn it_handles_resizes() {
         let x = rng.gen::<u64>().to_string().into_bytes();
         setget(&m, &x[..], i.to_string().into_bytes());
     }
-    panic!("stop!");
 }
