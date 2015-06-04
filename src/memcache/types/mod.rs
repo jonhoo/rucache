@@ -5,6 +5,7 @@ use std::fmt;
 use std::str;
 use std::mem;
 use std::io;
+use std::slice;
 
 pub mod constants;
 
@@ -26,7 +27,8 @@ pub struct Request {
 impl Request {
     #[allow(mutable_transmutes)]
     pub fn parse<'a>(buf : &'a mut [u8]) -> &'a Request {
-        let req : &mut Request = unsafe { mem::transmute(&buf) };
+        let buf_ : *const u8 = buf.as_ptr();
+        let req : &mut Request = unsafe { mem::transmute(buf_) };
         req.klen = BigEndian::read_u16(&buf[2..4]);
         req.vb = BigEndian::read_u16(&buf[6..8]);
         req.blen = BigEndian::read_u32(&buf[8..12]);
@@ -35,23 +37,32 @@ impl Request {
         req
     }
 
-    pub fn body(&self) -> &[u8] {
-        let prelen = self.elen as u32 + self.klen as u32;
-        &self.data[prelen as usize..self.blen as usize]
+    pub fn body<'a>(&'a self) -> &'a [u8] {
+        let prelen = self.elen as isize + self.klen as isize;
+        unsafe {
+            let ptr : *const u8 = mem::transmute::<&[u8; 0], *const u8>(&self.data);
+            slice::from_raw_parts(ptr.offset(prelen), (self.blen as isize - prelen) as usize)
+        }
     }
 
-    pub fn extras(&self) -> &[u8] {
-        &self.data[0..self.elen as usize]
+    pub fn extras<'a>(&'a self) -> &'a [u8] {
+        unsafe {
+            let ptr : *const u8 = mem::transmute::<&[u8; 0], *const u8>(&self.data);
+            slice::from_raw_parts(ptr, self.elen as usize)
+        }
     }
 
-    pub fn key(&self) -> &[u8] {
-        &self.data[self.elen as usize..(self.elen as usize + self.klen as usize)]
+    pub fn key<'a>(&'a self) -> &'a [u8] {
+        unsafe {
+            let ptr : *const u8 = mem::transmute::<&[u8; 0], *const u8>(&self.data);
+            slice::from_raw_parts(ptr.offset(self.elen as isize), self.klen as usize)
+        }
     }
 }
 
 impl fmt::Debug for Request {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "memcache request w/opcode={}, blen={}, key={:?}", self.op, self.blen, str::from_utf8(self.key()))
+        write!(f, "memcache request w/opcode={:?}, elen={}, blen={}, klen={}, key={:?}", constants::Command::from_u8(self.op), self.elen, self.blen, self.klen, str::from_utf8(self.key()))
     }
 }
 
@@ -134,7 +145,7 @@ impl<'a> ResponseSet<'a> {
 
 impl fmt::Debug for ResponseHeader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "memcache response w/status={}, klen={}, elen={}, blen={}", self.status, self.klen, self.elen, self.blen)
+        write!(f, "memcache response w/status={:?}, klen={}, elen={}, blen={}", constants::Status::from_u16(self.status), self.klen, self.elen, self.blen)
     }
 }
 

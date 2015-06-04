@@ -105,6 +105,7 @@ fn read_full(r : &mut io::Read, to : &mut [u8]) -> Result<(), io::Error> {
 }
 
 fn execute(m : &cucache::Map, req : &memcache::Request, c : &mut net::TcpStream) {
+    println!("got request {:?}", req);
     let mut rh = memcache::ResponseHeader::from_req(req);
     match memcache::Command::from_u8(req.op) {
         Some(op) => {
@@ -144,25 +145,29 @@ fn handle_client(m : &cucache::Map, mut c : net::TcpStream) {
             return
         }
 
-        body.truncate(100);
+        unsafe { body.set_len(100); }
         body.shrink_to_fit();
         body.clear();
+        unsafe { body.set_len(24); }
         match magic[0] {
             0x80 => {
                 // binary protocol
                 // memcache request
-                body.push(magic[0]);
+                body[0] = magic[0];
                 if let Err(_) = read_full(&mut c, &mut body[1..24]) {
                     return
                 }
 
-                let blen = BigEndian::read_u32(&body[8..12]);
-                body.reserve_exact(blen as usize);
-                if let Err(_) = read_full(&mut c, &mut body[24..(24+blen as usize)]) {
+                let blen = BigEndian::read_u32(&body[8..12]) as usize;
+                body.reserve_exact(blen);
+                unsafe { body.set_len(24 + blen); }
+
+                if let Err(_) = read_full(&mut c, &mut body[24..(24+blen)]) {
                     return
                 }
 
                 let req = memcache::Request::parse(&mut body[..]);
+                println!("{:?}", req);
                 execute(m, req, &mut c);
             }
             0x81 => {
