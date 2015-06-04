@@ -4,6 +4,10 @@ version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 
 [dependencies]
+enum_primitive = "0.0.2"
+byteorder = "*"
+getopts = "0.2"
 time = "0.1.12"
 rand = "0.3.8"
+num = "0.1.25"
 log = "0.3.1"

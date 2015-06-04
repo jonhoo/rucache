@@ -98,7 +98,7 @@ impl Bin {
     }
 
     #[allow(mutable_transmutes)]
-    pub fn setv(&self, i : usize, v : sync::Arc<slot::Value>, bno : u8) -> memcache::MapResult {
+    pub fn setv(&self, i : usize, v : sync::Arc<slot::Value>, bno : u8) -> ::MapResult {
         // setv should *always* be called while holding locks for all bins that may hold this value
         // since everyone else considers slot::Values to be read-only, this means we should be the
         // only ones to modify it.
@@ -125,13 +125,13 @@ impl Bin {
          */
         let oldv = self.gc(i);
         trace!("subbing in {:?} for {:?}", v, oldv);
-        self.vals[i].val.store(unsafe{ boxed::into_raw(Box::new(v.clone())) }, Ordering::SeqCst);
+        self.vals[i].val.store(boxed::into_raw(Box::new(v.clone())), Ordering::SeqCst);
         drop(oldv);
 
-        (memcache::Status::SUCCESS, Ok(Some(v)))
+        (memcache::Status::SUCCESS, Ok(v))
     }
 
-    pub fn subin(&self, v : sync::Arc<slot::Value>, bno : u8, now : i64) -> Result<memcache::MapResult, sync::Arc<slot::Value>> {
+    pub fn subin(&self, v : sync::Arc<slot::Value>, bno : u8, now : i64) -> Result<::MapResult, sync::Arc<slot::Value>> {
         for i in 0..ASSOCIATIVITY {
             match self.v(i, now) {
                 None => {
@@ -159,7 +159,7 @@ impl Bin {
         return false
     }
 
-    pub fn add(&self, v : sync::Arc<slot::Value>, bno : u8, now : i64) -> Result<memcache::MapResult, sync::Arc<slot::Value>> {
+    pub fn add(&self, v : sync::Arc<slot::Value>, bno : u8, now : i64) -> Result<::MapResult, sync::Arc<slot::Value>> {
         let x = self.mx.lock().unwrap();
         let res = self.subin(v, bno, now);
         drop(x);

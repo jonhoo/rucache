@@ -1,10 +1,12 @@
 #![crate_name = "cucache"]
 #![crate_type = "lib"]
-#![feature(unboxed_closures)]
 #![feature(alloc)]
 
+#[macro_use] extern crate enum_primitive;
+extern crate num;
 extern crate time;
 extern crate rand;
+extern crate byteorder;
 
 #[macro_use]
 extern crate log;
@@ -35,12 +37,15 @@ struct CuckooMap {
 }
 
 type Mapref = sync::Arc<CuckooMap>;
+pub type MapResult = (memcache::Status, Result<sync::Arc<slot::Value>, Option<String>>);
 
 pub struct Map {
     resize : sync::RwLock<bool>,
 	map    : AtomicPtr<Mapref>,
 	size   : AtomicUsize,
 }
+
+unsafe impl Sync for Map { }
 
 impl Map {
     fn fix(&self, nhashes : usize, rlock : RwLockReadGuard<bool>) {
@@ -96,7 +101,7 @@ impl Map {
         }
 
         // swap in new map
-        let newmp = unsafe { boxed::into_raw(newm) };
+        let newmp = boxed::into_raw(newm);
         trace!("updated primary mapref to {:?}", newmp);
         self.map.store(newmp, Ordering::SeqCst);
         self.size.store(nsize, Ordering::SeqCst);
@@ -117,7 +122,7 @@ impl Map {
         (mx, self.get_())
     }
 
-    fn op(&self, key : &[u8], upd : Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> memcache::MapResult {
+    fn op(&self, key : &[u8], upd : Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> MapResult {
         let start = time::get_time();
         loop {
             let (mx, map) = self.getm();
@@ -134,43 +139,43 @@ impl Map {
         }
     }
 
-    pub fn get(&self, key : &[u8]) -> memcache::MapResult {
+    pub fn get(&self, key : &[u8]) -> MapResult {
         self.get_().get(key)
     }
 
-    pub fn delete(&self, key : &[u8], casid : u64) -> memcache::MapResult {
+    pub fn delete(&self, key : &[u8], casid : u64) -> MapResult {
         self.getm().1.delete(key, casid)
     }
 
-    pub fn set(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+    pub fn set(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> MapResult {
         self.op(key, memcache::fset(bytes, flags, expires, 0))
     }
 
-    pub fn add(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+    pub fn add(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> MapResult {
         self.op(key, memcache::fadd(bytes, flags, expires))
     }
 
-    pub fn replace(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> memcache::MapResult {
+    pub fn replace(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64) -> MapResult {
         self.op(key, memcache::freplace(bytes, flags, expires))
     }
 
-    pub fn append(&self, key : &[u8], bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
+    pub fn append(&self, key : &[u8], bytes : Vec<u8>, casid : u64) -> MapResult {
         self.op(key, memcache::fappend(bytes, casid))
     }
 
-    pub fn prepend(&self, key : &[u8], bytes : Vec<u8>, casid : u64) -> memcache::MapResult {
+    pub fn prepend(&self, key : &[u8], bytes : Vec<u8>, casid : u64) -> MapResult {
         self.op(key, memcache::fprepend(bytes, casid))
     }
 
-    pub fn cas(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64, casid : u64) -> memcache::MapResult {
+    pub fn cas(&self, key : &[u8], bytes : Vec<u8>, flags : u32, expires : i64, casid : u64) -> MapResult {
         self.op(key, memcache::fset(bytes, flags, expires, casid))
     }
 
-    pub fn incr(&self, key : &[u8], by : u64, def : u64, expires : i64) -> memcache::MapResult {
+    pub fn incr(&self, key : &[u8], by : u64, def : u64, expires : i64) -> MapResult {
         self.op(key, memcache::fincr(by, def, expires))
     }
 
-    pub fn decr(&self, key : &[u8], by : u64, def : u64, expires : i64) -> memcache::MapResult {
+    pub fn decr(&self, key : &[u8], by : u64, def : u64, expires : i64) -> MapResult {
         self.op(key, memcache::fdecr(by, def, expires))
     }
 }
@@ -194,7 +199,7 @@ pub fn new(esize_in : usize) -> Map {
     trace!("(actually {} slots)", esize);
 
     let newm = Box::new(create(esize));
-    let newmp = unsafe { boxed::into_raw(newm) };
+    let newmp = boxed::into_raw(newm);
     trace!("new primary mapref is {:?}", newmp);
     let m = Map {
         resize : sync::RwLock::new(false),
@@ -230,7 +235,7 @@ struct Displacement {
 
 impl CuckooMap {
     /// get returns the current value (if any) for the given key
-    pub fn get(&self, key : &[u8]) -> memcache::MapResult {
+    pub fn get(&self, key : &[u8]) -> MapResult {
         debug!("asked to retrieve key {:?}", key);
 
         let now = time::get_time().sec;
@@ -242,7 +247,7 @@ impl CuckooMap {
             trace!("checking bin {:?}", bin);
             match self.bins[bin].has(key, now) {
                 Some((_, v)) => {
-                    return (memcache::Status::SUCCESS, Ok(Some(v)))
+                    return (memcache::Status::SUCCESS, Ok(v))
                 }
                 _ => {}
             }
@@ -268,7 +273,7 @@ impl CuckooMap {
         v
     }
 
-    pub fn insert(&self, key : &[u8], upd : &Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> memcache::MapResult {
+    pub fn insert(&self, key : &[u8], upd : &Box<Fn(Option<&memcache::Item>) -> (memcache::Status, Result<memcache::Item, Option<String>>)>) -> MapResult {
         debug!("asked to do an insert of key {:?}", key);
         trace!("using {} hashes and {} bins", self.nhashes.load(Ordering::SeqCst), self.bins.len());
 
@@ -373,14 +378,14 @@ impl CuckooMap {
         }
     }
 
-    pub fn delete(&self, key : &[u8], casid : u64) -> memcache::MapResult {
+    pub fn delete(&self, key : &[u8], casid : u64) -> MapResult {
         debug!("asked to do delete key {:?}", key);
 
         let now = time::get_time().sec;
         let mut bins = (0..self.nhashes.load(Ordering::SeqCst)).map(|n| self.nth_key_bin(key, n)).collect();
         let mxs = self.lock_in_order(&mut bins);
 
-        let mut res : memcache::MapResult = (memcache::Status::KEY_ENOENT, Err(None));
+        let mut res : MapResult = (memcache::Status::KEY_ENOENT, Err(None));
         for (b, mx) in mxs {
             match self.bins[b].has(key, now) {
                 Some((i, v)) => {
@@ -389,7 +394,7 @@ impl CuckooMap {
                     }
 
                     self.bins[b].kill(i);
-                    res = (memcache::Status::SUCCESS, Ok(Some(v)))
+                    res = (memcache::Status::SUCCESS, Ok(v))
                 }
                 _ => {}
             }

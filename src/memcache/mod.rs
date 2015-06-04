@@ -2,6 +2,10 @@ use std::fmt;
 use std::str;
 use std::str::FromStr;
 
+mod types;
+pub use self::types::{Request, ResponseHeader, ResponseSet};
+pub use self::types::constants::{REQ_MAGIC, RES_MAGIC, Status, Command};
+
 #[derive(Debug)]
 pub struct Item {
     pub bytes   : Vec<u8>,
@@ -21,26 +25,6 @@ impl Item {
         return self.expires == 0 || self.expires > now
     }
 }
-
-#[allow(non_camel_case_types)]
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum Status {
-    SUCCESS         = 0x00,
-	KEY_ENOENT      = 0x01,
-	KEY_EEXISTS     = 0x02,
-	E2BIG           = 0x03,
-	EINVAL          = 0x04,
-	NOT_STORED      = 0x05,
-	DELTA_BADVAL    = 0x06,
-	NOT_MY_VBUCKET  = 0x07,
-	UNKNOWN_COMMAND = 0x81,
-	ENOMEM          = 0x82,
-	TMPFAIL         = 0x86,
-}
-
-use std::sync;
-use slot;
-pub type MapResult = (Status, Result<Option<sync::Arc<slot::Value>>, Option<String>>);
 
 pub fn fset(bytes : Vec<u8>, flags : u32, expires : i64, casid : u64) -> Box<Fn(Option<&Item>) -> (Status, Result<Item, Option<String>>)> {
     Box::new(move |prev : Option<&Item>| {
