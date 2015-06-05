@@ -380,47 +380,53 @@ impl CuckooMap {
             val: res.unwrap(),
         });
 
-        trace!("checking for direct insert");
-        for (bi, b) in bins.iter().enumerate() {
-            if self.bins[*b].available(now) {
-                trace!("bin {} has available slot", *b);
-                match self.bins[*b].add(newv, bi as u8, now) {
-                    Ok(res) => { return res; }
-                    Err(v) => { trace!("add failed, darn..."); newv = v; }
-                }
-            }
-        }
-
-        trace!("need to do a search");
-        loop {
-            let path_ = self.search(bins, now);
-            match path_ {
-                None => {
-                    return (memcache::Status::ENOMEM, Err(None))
-                }
-                _ => {}
-            }
-
-            let path = path_.unwrap();
-            trace!("found path {:?}", path);
-            let freeing = path[0].from;
-
-            // sanity check that this path will make room in the right bin
-            let mut tobin = 0;
+        'direct: loop { // this loop is *only* needed so we can "goto" 'direct
+            trace!("checking for direct insert");
             for (bi, b) in bins.iter().enumerate() {
-                if freeing == *b {
-                    tobin = bi as u8;
+                if self.bins[*b].available(now) {
+                    trace!("bin {} has available slot", *b);
+                    match self.bins[*b].add(newv, bi as u8, now) {
+                        Ok(res) => { return res; }
+                        Err(v) => { trace!("add failed, darn..."); newv = v; }
+                    }
                 }
             }
 
-            // only after the search do we acquire locks
-            if self.validate_execute(path, now) {
-                match self.bins[freeing].add(newv, tobin, now) {
-                    Ok(res) => { return res; }
-                    Err(v) => { newv = v; }
+            trace!("need to do a search");
+            loop {
+                let path_ = self.search(bins, now);
+                match path_ {
+                    None => {
+                        return (memcache::Status::ENOMEM, Err(None))
+                    }
+                    _ => {}
                 }
+
+                let path = path_.unwrap();
+                if path.len() == 0 {
+                    continue 'direct;
+                }
+
+                trace!("found path {:?}", path);
+                let freeing = path[0].from;
+
+                // sanity check that this path will make room in the right bin
+                let mut tobin = 0;
+                for (bi, b) in bins.iter().enumerate() {
+                    if freeing == *b {
+                        tobin = bi as u8;
+                    }
+                }
+
+                // only after the search do we acquire locks
+                if self.validate_execute(path, now) {
+                    match self.bins[freeing].add(newv, tobin, now) {
+                        Ok(res) => { return res; }
+                        Err(v) => { newv = v; }
+                    }
+                }
+                trace!("search path validation failed");
             }
-            trace!("search path validation failed");
         }
     }
 
