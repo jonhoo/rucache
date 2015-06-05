@@ -127,11 +127,9 @@ impl ResponseHeader {
 impl<'a> ResponseSet<'a> {
     pub fn transmit(mut self, to : &mut io::Write) -> bool {
         if self.hdr.status == constants::Status::KEY_ENOENT as u16 {
-            if let Some(op) = constants::Command::from_u8(self.hdr.op) {
-                if op == constants::Command::GETQ || op == constants::Command::GETKQ {
-                    // no output on cache miss
-                    return true;
-                }
+            if self.hdr.op == constants::Command::GETQ as u8 || self.hdr.op == constants::Command::GETKQ as u8 {
+                // no output on cache miss
+                return true;
             }
         }
 

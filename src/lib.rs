@@ -38,14 +38,17 @@ macro_rules! get_bin {
 }
 
 macro_rules! get_bins {
-    ($this:ident, $key:expr) => {
+    ($this:ident, $hold:ident, $key:expr) => {
         {
             let mut khash : u64 = OFFSET64;
             for b in $key {
                 khash ^= *b as u64;
                 khash *= PRIME64;
             }
-            (0..$this.nhashes.load(Ordering::Relaxed)).map(|n| ((khash ^ n as u64) * PRIME64) as usize % $this.bins.len()).collect::<Vec<usize>>()
+            for n in 0..MAX_HASHES {
+                $hold[n] = ((khash ^ n as u64) * PRIME64) as usize % $this.bins.len();
+            }
+            &$hold[0..$this.nhashes.load(Ordering::Relaxed)]
         }
     }
 }
@@ -284,13 +287,14 @@ impl CuckooMap {
         debug!("asked to retrieve key {:?}", key);
 
         let now = time::get_time().sec;
-        let bins = get_bins!(self, key);
+        let mut hold = [0_usize; MAX_HASHES];
+        let bins = get_bins!(self, hold, key);
 
         trace!("bins are {:?}", bins);
 
         for bin in bins {
             trace!("checking bin {:?}", bin);
-            match self.bins[bin].has(key, now) {
+            match self.bins[*bin].has(key, now) {
                 Some((_, v)) => {
                     return (memcache::Status::SUCCESS, Ok(v))
                 }
@@ -319,7 +323,7 @@ impl CuckooMap {
         drop(mxs);
     }
 
-    fn lock_in_order(&self, bins_ : &Vec<usize>) -> Vec<(usize, sync::MutexGuard<bins::Void>)> {
+    fn lock_in_order(&self, bins_ : &[usize]) -> Vec<(usize, sync::MutexGuard<bins::Void>)> {
         let mut bins = bins_.to_vec();
         bins.sort();
 
@@ -340,7 +344,8 @@ impl CuckooMap {
         trace!("using {} hashes and {} bins", self.nhashes.load(Ordering::SeqCst), self.bins.len());
 
         let now = time::get_time().sec;
-        let mut bins = get_bins!(self, key);
+        let mut hold = [0_usize; MAX_HASHES];
+        let bins = get_bins!(self, hold, key);
 
         trace!("bins are {:?}", bins);
 
@@ -403,7 +408,7 @@ impl CuckooMap {
 
         trace!("need to do a search");
         loop {
-            let path_ = self.search(&bins, now);
+            let path_ = self.search(bins, now);
             match path_ {
                 None => {
                     return (memcache::Status::ENOMEM, Err(None))
@@ -414,12 +419,6 @@ impl CuckooMap {
             let path = path_.unwrap();
             trace!("found path {:?}", path);
             let freeing = path[0].from;
-
-            // recompute bins because #hashes might have changed
-            let hashes = self.nhashes.load(Ordering::SeqCst);
-            if bins.len() != hashes { 
-                bins = get_bins!(self, &newv.key[..]);
-            }
 
             // sanity check that this path will make room in the right bin
             let mut tobin = 0;
@@ -444,8 +443,9 @@ impl CuckooMap {
         debug!("asked to do delete key {:?}", key);
 
         let now = time::get_time().sec;
-        let mut bins = get_bins!(self, key);
-        let mxs = self.lock_in_order(&mut bins);
+        let mut hold = [0_usize; MAX_HASHES];
+        let bins = get_bins!(self, hold, key);
+        let mxs = self.lock_in_order(bins);
 
         let mut res : MapResult = (memcache::Status::KEY_ENOENT, Err(None));
         for (b, mx) in mxs {
@@ -465,7 +465,7 @@ impl CuckooMap {
         res
     }
 
-    fn search(&self, bins : &Vec<usize>, now : i64) -> Option<Vec<Displacement>> {
+    fn search(&self, bins : &[usize], now : i64) -> Option<Vec<Displacement>> {
         for depth in 1..MAX_SEARCH_DEPTH {
             for b in bins {
                 if let path @ Some(_) = self.find(Vec::new(), *b, depth as isize, now) {
