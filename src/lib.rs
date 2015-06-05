@@ -30,9 +30,9 @@ macro_rules! get_bin {
             let mut khash : u64 = OFFSET64;
             for b in $key {
                 khash ^= *b as u64;
-                khash *= PRIME64;
+                khash = khash.wrapping_mul(PRIME64);
             }
-            ((khash ^ ($n as u64)) * PRIME64) as usize % $this.bins.len()
+            ((khash ^ ($n as u64)).wrapping_mul(PRIME64)) as usize % $this.bins.len()
         }
     }
 }
@@ -43,10 +43,10 @@ macro_rules! get_bins {
             let mut khash : u64 = OFFSET64;
             for b in $key {
                 khash ^= *b as u64;
-                khash *= PRIME64;
+                khash.wrapping_mul(PRIME64);
             }
             for n in 0..MAX_HASHES {
-                $hold[n] = ((khash ^ n as u64) * PRIME64) as usize % $this.bins.len();
+                $hold[n] = ((khash ^ n as u64).wrapping_mul(PRIME64)) as usize % $this.bins.len();
             }
             &$hold[0..$this.nhashes.load(Ordering::Relaxed)]
         }
