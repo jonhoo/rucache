@@ -6,7 +6,6 @@
 extern crate num;
 extern crate time;
 extern crate rand;
-extern crate byteorder;
 
 #[macro_use]
 extern crate log;
@@ -229,22 +228,8 @@ impl Map {
 }
 
 pub fn new(esize_in : usize) -> Map {
-    let mut esize = esize_in;
-    if esize == 0 {
-        esize = 1 << 16;
-    }
+    let esize = if esize_in == 0 {1 << 16} else {esize_in.next_power_of_two()};
     debug!("constructing map with {} slots", esize);
-
-    // make esize a power of two
-    if (esize&(esize-1)) != 0 {
-        // at least 2^10 bins unless we're given a power of two explicitly
-        let mut shift : usize = 1 << 10;
-        while esize > shift {
-            shift <<= 1
-        }
-        esize = shift;
-    }
-    trace!("(actually {} slots)", esize);
 
     let newm = Box::new(create(esize));
     let newmp = boxed::into_raw(newm);

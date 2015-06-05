@@ -1,4 +1,3 @@
-use byteorder::{BigEndian, ByteOrder};
 use num::traits::FromPrimitive;
 
 use std::fmt;
@@ -29,11 +28,11 @@ impl Request {
     pub fn parse<'a>(buf : &'a mut [u8]) -> &'a Request {
         let buf_ : *const u8 = buf.as_ptr();
         let req : &mut Request = unsafe { mem::transmute(buf_) };
-        req.klen = BigEndian::read_u16(&buf[2..4]);
-        req.vb = BigEndian::read_u16(&buf[6..8]);
-        req.blen = BigEndian::read_u32(&buf[8..12]);
-        req.opq = BigEndian::read_u32(&buf[12..16]);
-        req.cas = BigEndian::read_u64(&buf[16..24]);
+        req.klen = u16::from_be(req.klen);
+        req.vb = u16::from_be(req.vb);
+        req.blen = u32::from_be(req.blen);
+        req.opq = u32::from_be(req.opq);
+        req.cas = u64::from_be(req.cas);
         debug!("{:?}", req);
         req
     }
@@ -135,16 +134,17 @@ impl<'a> ResponseSet<'a> {
 
         let res = self.hdr.status;
 
+        self.hdr.klen = u16::to_be(self.hdr.klen);
+        self.hdr.status = u16::to_be(self.hdr.status);
+        self.hdr.blen = u32::to_be(self.hdr.blen);
+        self.hdr.opq = u32::to_be(self.hdr.opq);
+        self.hdr.cas = u64::to_be(self.hdr.cas);
+
         debug!("{:?}", self);
         let buf = unsafe {
-            let ptr : *mut u8 = mem::transmute(&mut self.hdr);
-            slice::from_raw_parts_mut(ptr, 24)
+            let ptr : *const u8 = mem::transmute(&self.hdr);
+            slice::from_raw_parts(ptr, 24)
         };
-        BigEndian::write_u16(&mut buf[2..4], self.hdr.klen);
-        BigEndian::write_u16(&mut buf[6..8], self.hdr.status);
-        BigEndian::write_u32(&mut buf[8..12], self.hdr.blen);
-        BigEndian::write_u32(&mut buf[12..16], self.hdr.opq);
-        BigEndian::write_u64(&mut buf[16..24], self.hdr.cas);
 
         if let Err(_) = to.write_all(buf) { return false; }
         if let Err(_) = to.write_all(self.extras) { return false; }
