@@ -89,13 +89,16 @@ impl Bin {
             return None
         }
 
-        let av : &sync::Arc<slot::Value> = unsafe { mem::transmute(v) };
-
-        if !av.val.present(now) {
-            return None
+        // NOTE: we need to use a Weak here instead of an Arc (which is the real type)
+        // so that we can check against the case where the value is dropped between we read the
+        // pointer and we clone the value. if the format of sync::Arc and sync::Weak every diverge,
+        // we have a problem, and this code needs to be changed.
+        if let Some(av) = unsafe { mem::transmute::<*mut sync::Arc<slot::Value>, &sync::Weak<slot::Value>>(v) }.upgrade() {
+            if av.val.present(now) {
+                return Some(av)
+            }
         }
-
-        Some(av.clone())
+        return None
     }
 
     pub fn gc(&self, i : usize) -> Option<Box<sync::Arc<slot::Value>>> {
