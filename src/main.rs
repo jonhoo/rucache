@@ -1,4 +1,5 @@
 #![feature(scoped)]
+#![feature(tcp)]
 
 extern crate rucache;
 use rucache::memcache;
@@ -248,6 +249,9 @@ fn execute(m : &rucache::Map, req : &memcache::Request, c : &mut net::TcpStream)
 fn handle_client(m : &rucache::Map, mut c : net::TcpStream) {
     let mut magic = [0_u8; 1];
     let mut body = Vec::with_capacity(100);
+
+    c.set_nodelay(true);
+
     'outer: loop {
         if let Err(_) = read_full(&mut c, &mut magic) {
             break 'outer;
